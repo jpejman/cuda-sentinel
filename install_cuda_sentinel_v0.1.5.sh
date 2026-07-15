@@ -1,0 +1,184 @@
+#!/bin/bash
+# install_cuda_sentinel_v0.1.5-patch1.sh
+# CUDA Sentinel Installer v0.1.5-patch1
+# Fixes: proposal directory creation, full directory scaffolding, safer systemd generation,
+# improved logging, NVIDIA driver validation, smoke-test readiness.
+
+set -e
+
+APP_DIR="/opt/cuda-sentinel"
+LOG_DIR="/var/log/cuda-sentinel"
+SYSTEMD_DIR="/etc/systemd/system"
+SERVICE_FILE="$SYSTEMD_DIR/cuda-sentinel.service"
+PROPOSAL_DIR="$APP_DIR/proposals"
+UTILS_DIR="$APP_DIR/utils"
+FIXPROPOSAL_DIR="$APP_DIR/fix_proposals"
+BACKUP_DIR="/opt/cuda-sentinel-v0.1.5-backup"
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+log() {
+    echo -e "[+] $1"
+}
+warn() {
+    echo -e "[!] $1"
+}
+success() {
+    echo -e "[\033[0;32m\u2713\033[0m] $1"
+}
+
+echo
+log "CUDA Sentinel Installer - Version v0.1.5-patch1"
+echo
+
+# ----------------------------------------------------
+# STEP 1 — BACKUP EXISTING INSTALL
+# ----------------------------------------------------
+if [ -d "$APP_DIR" ]; then
+    warn "Previous installation detected. Creating backup at $BACKUP_DIR"
+    rm -rf "$BACKUP_DIR" 2>/dev/null || true
+    cp -r "$APP_DIR" "$BACKUP_DIR"
+    success "Backup created: $BACKUP_DIR"
+fi
+
+# ----------------------------------------------------
+# STEP 2 — ENSURE REQUIRED DIRECTORIES
+# ----------------------------------------------------
+log "Ensuring required directory structure..."
+
+mkdir -p "$APP_DIR" \
+         "$PROPOSAL_DIR" \
+         "$UTILS_DIR" \
+         "$FIXPROPOSAL_DIR"
+
+success "Directory tree ensured: $APP_DIR"
+
+# ----------------------------------------------------
+# STEP 3 — ENSURE LOG DIRECTORY
+# ----------------------------------------------------
+mkdir -p "$LOG_DIR"
+touch "$LOG_DIR/install.log"
+success "Log directory ready at: $LOG_DIR"
+
+# ----------------------------------------------------
+# STEP 4 — WARN USER TO PLACE MANUAL FILES
+# ----------------------------------------------------
+warn "Skipping rsync (manual copy expected)."
+warn "Place all updated CUDA Sentinel app files into: $APP_DIR"
+echo
+
+# ----------------------------------------------------
+# STEP 5 — BACKFILL FIX PROPOSAL IF MISSING
+# ----------------------------------------------------
+if [ ! -f "$PROPOSAL_DIR/fix_nvidia_driver.sh" ]; then
+    log "Backfilling missing fix_nvidia_driver.sh..."
+
+    cat << 'EOF' > "$PROPOSAL_DIR/fix_nvidia_driver.sh"
+#!/bin/bash
+# fix_nvidia_driver.sh — repairs missing or broken NVIDIA drivers
+
+LOG_FILE="/var/log/cuda-sentinel/fix_nvidia_driver.log"
+echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Running fix_nvidia_driver.sh" | tee -a "$LOG_FILE"
+
+ubuntu-drivers devices | tee -a "$LOG_FILE"
+
+echo -e "\nChoose option:\n1) Auto install recommended\n2) Install latest driver (535)\n3) Quit"
+read -p "Enter choice [1-3]: " choice
+
+case "$choice" in
+    1) sudo ubuntu-drivers autoinstall | tee -a "$LOG_FILE" ;;
+    2) sudo apt install -y nvidia-driver-535 | tee -a "$LOG_FILE" ;;
+    *) echo "Aborted." | tee -a "$LOG_FILE" ;;
+esac
+EOF
+
+    chmod +x "$PROPOSAL_DIR/fix_nvidia_driver.sh"
+    success "Fix proposal created: fix_nvidia_driver.sh"
+else
+    success "fix_nvidia_driver.sh already present"
+fi
+
+# ----------------------------------------------------
+# STEP 6 — NVIDIA DRIVER CHECK
+# ----------------------------------------------------
+log "Checking NVIDIA driver availability..."
+
+if ! command -v nvidia-smi &> /dev/null; then
+    warn "nvidia-smi not found. Creating proposal JSON entry."
+
+    echo "{
+  \"id\": \"fix_nvidia_driver\",
+  \"description\": \"Install or repair missing NVIDIA drivers\",
+  \"timestamp\": \"$TIMESTAMP\"
+}" > "$PROPOSAL_DIR/fix_nvidia_driver.json"
+
+    success "Proposal saved: fix_nvidia_driver.json"
+else
+    if nvidia-smi &>/dev/null; then
+        success "NVIDIA driver detected and functional."
+    else
+        warn "nvidia-smi exists but GPU communication failed."
+        read -p "Run fix_nvidia_driver.sh now? (Y/n): " ans
+        if [[ "$ans" =~ ^[Yy]$ || -z "$ans" ]]; then
+            bash "$PROPOSAL_DIR/fix_nvidia_driver.sh"
+        else
+            warn "Driver fix skipped."
+        fi
+    fi
+fi
+
+# ----------------------------------------------------
+# STEP 7 — SYSTEMD SERVICE FILE
+# ----------------------------------------------------
+if [ ! -f "$SERVICE_FILE" ]; then
+    log "Creating systemd service file at $SERVICE_FILE..."
+
+    cat << EOF > "$SERVICE_FILE"
+[Unit]
+Description=CUDA Sentinel Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 $APP_DIR/agent.py
+WorkingDirectory=$APP_DIR
+StandardOutput=append:$LOG_DIR/agent.log
+StandardError=append:$LOG_DIR/agent.err
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    success "Systemd unit created."
+else
+    success "Systemd unit already exists."
+fi
+
+# ----------------------------------------------------
+# STEP 8 — RELOAD + ENABLE + START SERVICE
+# ----------------------------------------------------
+log "Reloading systemd and enabling service..."
+systemctl daemon-reexec
+systemctl daemon-reload
+systemctl enable cuda-sentinel
+
+log "Starting cuda-sentinel..."
+if systemctl start cuda-sentinel; then
+    success "cuda-sentinel started successfully."
+else
+    warn "Service failed to start. Check: $LOG_DIR/agent.err"
+fi
+
+# ----------------------------------------------------
+# FINAL SUMMARY
+# ----------------------------------------------------
+echo "------------------------------------------------------------"
+success "CUDA Sentinel v0.1.5-patch1 installation complete"
+echo "App Directory:     $APP_DIR"
+echo "Log Directory:     $LOG_DIR"
+echo "Service File:      $SERVICE_FILE"
+echo "Fix Proposals:     $PROPOSAL_DIR"
+echo "Backup Directory:  $BACKUP_DIR"
+echo "UTC Timestamp:     $TIMESTAMP"
+echo "------------------------------------------------------------"
+echo
