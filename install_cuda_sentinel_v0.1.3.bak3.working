@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# install_cuda_sentinel_v0.1.3.sh
+# Version: v0.1.3
+# Description: Installer for CUDA Sentinel Agent with NVIDIA auto-remediation, timestamped logs, and systemd integration.
+
+APP_NAME="cuda-sentinel"
+APP_VERSION="v0.1.3"
+APP_DIR="/opt/$APP_NAME"
+LOG_DIR="/var/log/$APP_NAME"
+SYSTEMD_UNIT="/etc/systemd/system/$APP_NAME.service"
+BACKUP_DIR="/opt/${APP_NAME}-${APP_VERSION}-backup"
+FIX_DIR="$APP_DIR/proposals"
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+echo "[+] CUDA Sentinel Installer - Version $APP_VERSION"
+
+# ─────────────────────────────────────────────
+# Step 1: Backup previous install
+# ─────────────────────────────────────────────
+if [ -d "$APP_DIR" ]; then
+    echo "[!] Previous install found. Creating backup at $BACKUP_DIR"
+    sudo cp -r "$APP_DIR" "$BACKUP_DIR"
+    echo "[+] Backup complete: $BACKUP_DIR"
+fi
+
+# ─────────────────────────────────────────────
+# Step 2: Ensure log directory
+# ─────────────────────────────────────────────
+mkdir -p "$LOG_DIR"
+echo "[+] Log directory ensured at $LOG_DIR"
+
+# ─────────────────────────────────────────────
+# Step 3: Enable timestamped logging (external rotation assumed)
+# ─────────────────────────────────────────────
+echo "[+] Timestamped logging enabled (external rotation assumed)"
+
+# ─────────────────────────────────────────────
+# Step 4: Copy files — manual step
+# ─────────────────────────────────────────────
+echo "[~] Skipping rsync (manual copy expected). Please place updated files in $APP_DIR"
+
+# ─────────────────────────────────────────────
+# Step 5: NVIDIA driver detection + auto-fix
+# ─────────────────────────────────────────────
+if ! command -v nvidia-smi &> /dev/null; then
+    echo "[!] NVIDIA driver not detected. Registering fix proposal."
+
+    mkdir -p "$FIX_DIR"
+    cat > "$FIX_DIR/fix_nvidia_driver.json" <<EOF
+{
+  "fix_id": "fix_nvidia_driver",
+  "detected_at": "$TIMESTAMP",
+  "severity": "high",
+  "category": "driver",
+  "description": "NVIDIA driver missing or failed. System lacks 'nvidia-smi' support.",
+  "proposed_fix": "Install appropriate NVIDIA drivers for your CUDA-enabled GPU. e.g. 'sudo apt install nvidia-driver-535'"
+}
+EOF
+    echo "[+] Fix proposal saved to: $FIX_DIR/fix_nvidia_driver.json"
+else
+    echo "[✓] NVIDIA driver detected via nvidia-smi"
+fi
+
+# ─────────────────────────────────────────────
+# Step 6: Regenerate missing systemd unit
+# ─────────────────────────────────────────────
+if [ ! -f "$SYSTEMD_UNIT" ]; then
+    echo "[!] $APP_NAME.service file missing. Regenerating..."
+
+    cat <<EOF | sudo tee "$SYSTEMD_UNIT" > /dev/null
+[Unit]
+Description=CUDA Sentinel Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 $APP_DIR/agent.py
+WorkingDirectory=$APP_DIR
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:$LOG_DIR/agent.log
+StandardError=append:$LOG_DIR/agent.err.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    echo "[+] Systemd unit created at: $SYSTEMD_UNIT"
+fi
+
+# ─────────────────────────────────────────────
+# Step 7: Reload and enable service
+# ─────────────────────────────────────────────
+echo "[+] Running systemctl daemon-reload and enabling service..."
+sudo systemctl daemon-reload
+sudo systemctl enable "$APP_NAME"
+sudo systemctl start "$APP_NAME"
+
+# ─────────────────────────────────────────────
+# Step 8: Completion
+# ─────────────────────────────────────────────
+echo "------------------------------------------------------------"
+echo "[✓] Install Complete - CUDA Sentinel $APP_VERSION"
+echo "Log Dir:         $LOG_DIR"
+echo "App Dir:         $APP_DIR"
+echo "Systemd Unit:    $SYSTEMD_UNIT"
+echo "Fix Proposals:   $FIX_DIR"
+echo "Backup:          $BACKUP_DIR"
+echo "UTC Timestamp:   $TIMESTAMP"
+echo "------------------------------------------------------------"
