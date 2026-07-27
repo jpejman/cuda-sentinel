@@ -1,17 +1,20 @@
 #!/bin/bash
-# install_cuda_sentinel_v0.1.5
-# CUDA Sentinel Installer v0.1.5
-# Features: auto-backfill proposals, log rotation settings, NVIDIA detection, smoke test mode
+# install_cuda_sentinel_v0.1.5-patch1.sh
+# CUDA Sentinel Installer v0.1.5-patch1
+# Fixes: proposal directory creation, full directory scaffolding, safer systemd generation,
+# improved logging, NVIDIA driver validation, smoke-test readiness.
+
+set -e
 
 APP_DIR="/opt/cuda-sentinel"
 LOG_DIR="/var/log/cuda-sentinel"
 SYSTEMD_DIR="/etc/systemd/system"
 SERVICE_FILE="$SYSTEMD_DIR/cuda-sentinel.service"
 PROPOSAL_DIR="$APP_DIR/proposals"
+UTILS_DIR="$APP_DIR/utils"
+FIXPROPOSAL_DIR="$APP_DIR/fix_proposals"
 BACKUP_DIR="/opt/cuda-sentinel-v0.1.5-backup"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-set -e
 
 log() {
     echo -e "[+] $1"
@@ -23,70 +26,112 @@ success() {
     echo -e "[\033[0;32m\u2713\033[0m] $1"
 }
 
-log "CUDA Sentinel Installer - Version v0.1.5"
+echo
+log "CUDA Sentinel Installer - Version v0.1.5-patch1"
+echo
 
-# Backup previous install
+# ----------------------------------------------------
+# STEP 1 — BACKUP EXISTING INSTALL
+# ----------------------------------------------------
 if [ -d "$APP_DIR" ]; then
-    warn "Previous install found. Creating backup at $BACKUP_DIR"
+    warn "Previous installation detected. Creating backup at $BACKUP_DIR"
+    rm -rf "$BACKUP_DIR" 2>/dev/null || true
     cp -r "$APP_DIR" "$BACKUP_DIR"
-    success "Backup complete: $BACKUP_DIR"
+    success "Backup created: $BACKUP_DIR"
 fi
 
-# Ensure log dir
+# ----------------------------------------------------
+# STEP 2 — ENSURE REQUIRED DIRECTORIES
+# ----------------------------------------------------
+log "Ensuring required directory structure..."
+
+mkdir -p "$APP_DIR" \
+         "$PROPOSAL_DIR" \
+         "$UTILS_DIR" \
+         "$FIXPROPOSAL_DIR"
+
+success "Directory tree ensured: $APP_DIR"
+
+# ----------------------------------------------------
+# STEP 3 — ENSURE LOG DIRECTORY
+# ----------------------------------------------------
 mkdir -p "$LOG_DIR"
 touch "$LOG_DIR/install.log"
-log "Log directory ensured at $LOG_DIR"
+success "Log directory ready at: $LOG_DIR"
 
-# Timestamped logging setup (external rotation assumed)
-log "Timestamped logging enabled"
+# ----------------------------------------------------
+# STEP 4 — WARN USER TO PLACE MANUAL FILES
+# ----------------------------------------------------
+warn "Skipping rsync (manual copy expected)."
+warn "Place all updated CUDA Sentinel app files into: $APP_DIR"
+echo
 
-# Skip rsync - manual copy expected
-warn "Skipping rsync (manual copy expected). Please place updated files in $APP_DIR"
-
-# Backfill missing fix proposals if needed
+# ----------------------------------------------------
+# STEP 5 — BACKFILL FIX PROPOSAL IF MISSING
+# ----------------------------------------------------
 if [ ! -f "$PROPOSAL_DIR/fix_nvidia_driver.sh" ]; then
-    log "Backfilling missing fix_nvidia_driver.sh script"
+    log "Backfilling missing fix_nvidia_driver.sh..."
+
     cat << 'EOF' > "$PROPOSAL_DIR/fix_nvidia_driver.sh"
 #!/bin/bash
-# Fix NVIDIA Driver Script
+# fix_nvidia_driver.sh — repairs missing or broken NVIDIA drivers
+
 LOG_FILE="/var/log/cuda-sentinel/fix_nvidia_driver.log"
-echo "[$(date -u)] Running fix_nvidia_driver.sh" | tee -a "$LOG_FILE"
+echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Running fix_nvidia_driver.sh" | tee -a "$LOG_FILE"
+
 ubuntu-drivers devices | tee -a "$LOG_FILE"
-echo -e "\nChoose option:\n1) Auto install recommended\n2) Install latest\n3) Quit"
-read -p "Enter your choice [1-3]: " choice
+
+echo -e "\nChoose option:\n1) Auto install recommended\n2) Install latest driver (535)\n3) Quit"
+read -p "Enter choice [1-3]: " choice
+
 case "$choice" in
-    1) sudo ubuntu-drivers autoinstall | tee -a "$LOG_FILE";;
-    2) sudo apt install -y nvidia-driver-535 | tee -a "$LOG_FILE";;
-    *) echo "Aborted" | tee -a "$LOG_FILE";;
+    1) sudo ubuntu-drivers autoinstall | tee -a "$LOG_FILE" ;;
+    2) sudo apt install -y nvidia-driver-535 | tee -a "$LOG_FILE" ;;
+    *) echo "Aborted." | tee -a "$LOG_FILE" ;;
 esac
 EOF
+
     chmod +x "$PROPOSAL_DIR/fix_nvidia_driver.sh"
-    log "Fix proposal script created"
+    success "Fix proposal created: fix_nvidia_driver.sh"
+else
+    success "fix_nvidia_driver.sh already present"
 fi
 
-# NVIDIA driver check
-if command -v nvidia-smi &> /dev/null; then
-    if nvidia-smi &> /dev/null; then
-        success "NVIDIA driver detected via nvidia-smi"
+# ----------------------------------------------------
+# STEP 6 — NVIDIA DRIVER CHECK
+# ----------------------------------------------------
+log "Checking NVIDIA driver availability..."
+
+if ! command -v nvidia-smi &> /dev/null; then
+    warn "nvidia-smi not found. Creating proposal JSON entry."
+
+    echo "{
+  \"id\": \"fix_nvidia_driver\",
+  \"description\": \"Install or repair missing NVIDIA drivers\",
+  \"timestamp\": \"$TIMESTAMP\"
+}" > "$PROPOSAL_DIR/fix_nvidia_driver.json"
+
+    success "Proposal saved: fix_nvidia_driver.json"
+else
+    if nvidia-smi &>/dev/null; then
+        success "NVIDIA driver detected and functional."
     else
-        warn "NVIDIA driver utility found, but communication failed."
-        read -p "Run fix proposal now? (Y/n): " confirm
-        if [[ "$confirm" == "Y" || "$confirm" == "y" || -z "$confirm" ]]; then
+        warn "nvidia-smi exists but GPU communication failed."
+        read -p "Run fix_nvidia_driver.sh now? (Y/n): " ans
+        if [[ "$ans" =~ ^[Yy]$ || -z "$ans" ]]; then
             bash "$PROPOSAL_DIR/fix_nvidia_driver.sh"
         else
-            warn "Fix skipped by user."
+            warn "Driver fix skipped."
         fi
     fi
-else
-    warn "nvidia-smi not found. Registering fix proposal."
-    FIX_FILE="$PROPOSAL_DIR/fix_nvidia_driver.json"
-    echo "{\n  \"id\": \"fix_nvidia_driver\",\n  \"description\": \"Install or repair missing NVIDIA drivers\",\n  \"timestamp\": \"$TIMESTAMP\"\n}" > "$FIX_FILE"
-    log "Fix proposal saved to: $FIX_FILE"
 fi
 
-# Generate or confirm service file
+# ----------------------------------------------------
+# STEP 7 — SYSTEMD SERVICE FILE
+# ----------------------------------------------------
 if [ ! -f "$SERVICE_FILE" ]; then
-    log "Generating new systemd service file..."
+    log "Creating systemd service file at $SERVICE_FILE..."
+
     cat << EOF > "$SERVICE_FILE"
 [Unit]
 Description=CUDA Sentinel Agent
@@ -103,23 +148,37 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 EOF
-    success "Systemd unit created: $SERVICE_FILE"
+
+    success "Systemd unit created."
+else
+    success "Systemd unit already exists."
 fi
 
-# Reload and start service
-log "Running systemctl daemon-reload and enabling service..."
+# ----------------------------------------------------
+# STEP 8 — RELOAD + ENABLE + START SERVICE
+# ----------------------------------------------------
+log "Reloading systemd and enabling service..."
 systemctl daemon-reexec
 systemctl daemon-reload
 systemctl enable cuda-sentinel
-systemctl start cuda-sentinel
 
-# Final summary
+log "Starting cuda-sentinel..."
+if systemctl start cuda-sentinel; then
+    success "cuda-sentinel started successfully."
+else
+    warn "Service failed to start. Check: $LOG_DIR/agent.err"
+fi
+
+# ----------------------------------------------------
+# FINAL SUMMARY
+# ----------------------------------------------------
 echo "------------------------------------------------------------"
-success "Install Complete - CUDA Sentinel v0.1.5"
-echo "Log Dir:         $LOG_DIR"
-echo "App Dir:         $APP_DIR"
-echo "Systemd Unit:    $SERVICE_FILE"
-echo "Fix Proposals:   $PROPOSAL_DIR"
-echo "Backup:          $BACKUP_DIR"
-echo "UTC Timestamp:   $TIMESTAMP"
+success "CUDA Sentinel v0.1.5-patch1 installation complete"
+echo "App Directory:     $APP_DIR"
+echo "Log Directory:     $LOG_DIR"
+echo "Service File:      $SERVICE_FILE"
+echo "Fix Proposals:     $PROPOSAL_DIR"
+echo "Backup Directory:  $BACKUP_DIR"
+echo "UTC Timestamp:     $TIMESTAMP"
 echo "------------------------------------------------------------"
+echo
