@@ -1,3 +1,4 @@
+import os
 import unittest
 from tempfile import TemporaryDirectory
 
@@ -57,6 +58,23 @@ class RuntimeTests(unittest.TestCase):
 
     def test_gpu_inventory_is_safe_without_nvidia_tooling(self):
         self.assertIsInstance(inventory(), list)
+
+    def test_operator_auth_protects_mutating_routes_when_configured(self):
+        from fastapi.testclient import TestClient
+        from cuda_sentinel.api import app
+
+        previous = os.environ.get("SENTINEL_OPERATOR_TOKEN")
+        os.environ["SENTINEL_OPERATOR_TOKEN"] = "test-token"
+        try:
+            client = TestClient(app)
+            payload = {"id": "evt-auth", "host": "test", "source": "test", "type": "test", "severity": "info", "message": "test"}
+            self.assertEqual(client.post("/v1/events", json=payload).status_code, 401)
+            self.assertEqual(client.post("/v1/events", json=payload, headers={"Authorization": "Bearer test-token"}).status_code, 201)
+        finally:
+            if previous is None:
+                os.environ.pop("SENTINEL_OPERATOR_TOKEN", None)
+            else:
+                os.environ["SENTINEL_OPERATOR_TOKEN"] = previous
 
 
 if __name__ == "__main__":

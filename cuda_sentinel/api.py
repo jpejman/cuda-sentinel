@@ -2,11 +2,12 @@ import json
 import logging
 import os
 import time
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from .models import Event, RemediationAudit, RemediationProposal, RemediationRequest, RemediationResult, Service
 from .remediation import RemediationService
 from .store import SentinelStore
 from .gpu import inventory
+from .auth import require_operator
 
 store = SentinelStore(os.environ.get("SENTINEL_STATE_DIR", "/var/lib/cuda-sentinel"))
 store.set_services([Service(id="api", name="sentinel-api", version="0.2.0", status="healthy", host=os.environ.get("HOSTNAME", "localhost"))])
@@ -48,7 +49,7 @@ def events() -> list[Event]:
     return store.events()[-100:]
 
 @app.post("/v1/events", response_model=Event, status_code=201)
-def ingest_event(event: Event) -> Event:
+def ingest_event(event: Event, _: None = Depends(require_operator)) -> Event:
     store.add_event(event)
     return event
 
@@ -61,7 +62,7 @@ def remediation_audit() -> list[RemediationAudit]:
     return store.audits()[-100:]
 
 @app.post("/v1/proposals/{proposal_id}/apply", response_model=RemediationResult)
-def apply_proposal(proposal_id: str, request: RemediationRequest) -> RemediationResult:
+def apply_proposal(proposal_id: str, request: RemediationRequest, _: None = Depends(require_operator)) -> RemediationResult:
     proposal = store.proposal(proposal_id)
     if proposal is None:
         raise HTTPException(status_code=404, detail="Proposal not found")

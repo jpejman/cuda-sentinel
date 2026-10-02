@@ -165,6 +165,7 @@ Environment=PYTHONPATH=$APP_DIR
 Environment=SENTINEL_EVENTS_URL=http://127.0.0.1:5001/v1/events
 Environment=SENTINEL_STATE_DIR=/var/lib/cuda-sentinel
 Environment=LOG_LEVEL=INFO
+Environment=SENTINEL_OPERATOR_TOKEN=
 StandardOutput=append:$LOG_DIR/agent.log
 StandardError=append:$LOG_DIR/agent.err
 Restart=on-failure
