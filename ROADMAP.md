@@ -12,13 +12,13 @@ source-backed GPU operations product. Priority is ordered by operational risk.
   deduplicating event store, kernel event parser, FastAPI endpoints, and a
   dry-run allowlisted remediation policy.
 - Four runtime unit tests and CI checks are now present.
+- Installer now packages the runtime, starts API and agent systemd units, and
+  the dashboard fetches live API data when available.
 
-## P0: Complete The Runtime And Safety Boundary
+## P0: Complete The Runtime And Safety Boundary (Mostly Complete)
 
-- Package the checked-in `cuda_sentinel` runtime into the Linux installer and
-  add a documented systemd entrypoint.
-- Replace mocked dashboard data with authenticated API calls and explicit
-  loading, empty, stale-data, and error states.
+- Add authenticated API calls and explicit loading, empty, stale-data, and
+  error states to the dashboard.
 - Add an approval identity and audit record to remediation requests.
 - Add a disposable Ubuntu/systemd install smoke test. Never test driver
   installation against a developer workstation.

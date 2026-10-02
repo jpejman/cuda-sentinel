@@ -7,9 +7,11 @@
 set -Eeuo pipefail
 
 APP_DIR="/opt/cuda-sentinel"
+SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="/var/log/cuda-sentinel"
 SYSTEMD_DIR="/etc/systemd/system"
 SERVICE_FILE="$SYSTEMD_DIR/cuda-sentinel.service"
+API_SERVICE_FILE="$SYSTEMD_DIR/cuda-sentinel-api.service"
 PROPOSAL_DIR="$APP_DIR/proposals"
 UTILS_DIR="$APP_DIR/utils"
 FIXPROPOSAL_DIR="$APP_DIR/fix_proposals"
@@ -31,7 +33,7 @@ if [[ "${EUID}" -ne 0 ]]; then
     exit 1
 fi
 
-for required_command in cp date mkdir nvidia-smi systemctl; do
+for required_command in cp date mkdir python3 systemctl; do
     if ! command -v "${required_command}" >/dev/null 2>&1; then
         warn "Required command not found: ${required_command}"
         exit 1
@@ -71,17 +73,18 @@ touch "$LOG_DIR/install.log"
 success "Log directory ready at: $LOG_DIR"
 
 # ----------------------------------------------------
-# STEP 4 — WARN USER TO PLACE MANUAL FILES
+# STEP 4 — INSTALL APPLICATION RUNTIME
 # ----------------------------------------------------
-warn "Skipping rsync (manual copy expected)."
-warn "Place all updated CUDA Sentinel app files into: $APP_DIR"
-echo
-
-if [[ ! -f "$APP_DIR/agent.py" ]]; then
-    warn "Runtime agent missing: $APP_DIR/agent.py"
-    warn "Copy the application payload into $APP_DIR and rerun the installer."
+if [[ ! -d "$SOURCE_DIR/cuda_sentinel" ]]; then
+    warn "Runtime package missing from installer source: $SOURCE_DIR/cuda_sentinel"
     exit 1
 fi
+cp -a "$SOURCE_DIR/cuda_sentinel" "$APP_DIR/"
+if [[ ! -f "$APP_DIR/cuda_sentinel/agent_runner.py" ]]; then
+    warn "Runtime agent entrypoint missing after installation."
+    exit 1
+fi
+success "Runtime package installed."
 
 # ----------------------------------------------------
 # STEP 5 — BACKFILL FIX PROPOSAL IF MISSING
@@ -156,8 +159,10 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 $APP_DIR/agent.py
+ExecStart=/usr/bin/python3 -m cuda_sentinel.agent_runner
 WorkingDirectory=$APP_DIR
+Environment=PYTHONPATH=$APP_DIR
+Environment=SENTINEL_EVENTS_URL=http://127.0.0.1:5001/v1/events
 StandardOutput=append:$LOG_DIR/agent.log
 StandardError=append:$LOG_DIR/agent.err
 Restart=on-failure
@@ -171,12 +176,47 @@ else
     success "Systemd unit already exists."
 fi
 
+if [ ! -f "$API_SERVICE_FILE" ]; then
+    log "Creating API systemd service file at $API_SERVICE_FILE..."
+
+    cat << EOF > "$API_SERVICE_FILE"
+[Unit]
+Description=CUDA Sentinel API
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m uvicorn cuda_sentinel.api:app --host 127.0.0.1 --port 5001
+WorkingDirectory=$APP_DIR
+Environment=PYTHONPATH=$APP_DIR
+StandardOutput=append:$LOG_DIR/api.log
+StandardError=append:$LOG_DIR/api.err
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    success "API systemd unit created."
+else
+    success "API systemd unit already exists."
+fi
+
 # ----------------------------------------------------
 # STEP 8 — RELOAD + ENABLE + START SERVICE
 # ----------------------------------------------------
 log "Reloading systemd and enabling service..."
 systemctl daemon-reload
+systemctl enable cuda-sentinel-api
 systemctl enable cuda-sentinel
+
+log "Starting cuda-sentinel-api..."
+if systemctl start cuda-sentinel-api; then
+    success "cuda-sentinel-api started successfully."
+else
+    warn "API service failed to start. Check: $LOG_DIR/api.err"
+fi
 
 log "Starting cuda-sentinel..."
 if systemctl start cuda-sentinel; then

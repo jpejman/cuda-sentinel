@@ -15,10 +15,10 @@ detecting CUDA/NVIDIA health issues and proposing targeted remediation.
 
 ## Current Installer Limitation
 
-The installer still expects the deployable application payload at
-`/opt/cuda-sentinel/agent.py`; packaging that runtime into the installer is the
-next deployment milestone. The checked-in Python runtime is the source of truth
-for the API/agent implementation.
+The installer now packages the checked-in `cuda_sentinel/` runtime and starts
+both API and `agent_runner` systemd entrypoints. It still requires a supported
+Debian or Ubuntu host with Python and systemd; NVIDIA tooling is checked and
+reported separately so missing drivers can produce a remediation proposal.
 
 Run the installer on a supported Debian/Ubuntu host only after placing the
 runtime files in `/opt/cuda-sentinel`:

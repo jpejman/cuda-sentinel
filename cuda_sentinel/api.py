@@ -1,11 +1,12 @@
 import os
 from fastapi import FastAPI, HTTPException
-from .models import Event, RemediationRequest, RemediationResult, Service
+from .models import Event, RemediationProposal, RemediationRequest, RemediationResult, Service
 from .remediation import RemediationService
 from .store import SentinelStore
 
 store = SentinelStore()
 store.set_services([Service(id="api", name="sentinel-api", version="0.2.0", status="healthy", host=os.environ.get("HOSTNAME", "localhost"))])
+store.set_proposals([RemediationProposal(id="p1", title="Reset GPU-0", rationale="Targeted reset for an unresponsive GPU.", risk="high", command="nvidia-smi --gpu-reset -i 0")])
 remediation = RemediationService()
 app = FastAPI(title="CUDA Sentinel API", version="0.2.0")
 
@@ -26,8 +27,8 @@ def ingest_event(event: Event) -> Event:
     store.add_event(event)
     return event
 
-@app.get("/v1/proposals")
-def proposals():
+@app.get("/v1/proposals", response_model=list[RemediationProposal])
+def proposals() -> list[RemediationProposal]:
     return store.proposals()
 
 @app.post("/v1/proposals/{proposal_id}/apply", response_model=RemediationResult)

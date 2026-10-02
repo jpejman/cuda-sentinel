@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -79,16 +79,40 @@ export default function CudaSentinelDashboard() {
   const [proposals, setProposals] = useState(proposalsSeed);
   const [filter, setFilter] = useState("");
 
+  useEffect(() => {
+    const apiBase = (import.meta as any).env?.VITE_SENTINEL_API || "http://127.0.0.1:5001";
+    const load = async () => {
+      try {
+        const [serviceResponse, eventResponse, proposalResponse] = await Promise.all([
+          fetch(`${apiBase}/v1/services`), fetch(`${apiBase}/v1/events`), fetch(`${apiBase}/v1/proposals`),
+        ]);
+        if (serviceResponse.ok) setServices(await serviceResponse.json());
+        if (eventResponse.ok) {
+          const apiEvents = await eventResponse.json();
+          setEvents(apiEvents.map((event: any) => ({ ...event, time: event.timestamp, gpu: event.gpu_index, summary: event.message })));
+        }
+        if (proposalResponse.ok) {
+          const apiProposals = await proposalResponse.json();
+          setProposals(apiProposals.map((proposal: any) => ({ ...proposal, impact: `Risk: ${proposal.risk}`, steps: [proposal.command], safety: [proposal.dry_run ? "Dry-run by default" : "Approval required"] })));
+        }
+      } catch (error) { console.warn("CUDA Sentinel API unavailable; showing demo data", error); }
+    };
+    void load();
+  }, []);
+
   const filteredEvents = useMemo(
     () => events.filter(e => (filter ? (e.type.toLowerCase().includes(filter.toLowerCase()) || e.summary.toLowerCase().includes(filter.toLowerCase())) : true)),
     [events, filter]
   );
 
-  const applyFix = (id: string) => {
+  const applyFix = async (id: string) => {
+    const apiBase = (import.meta as any).env?.VITE_SENTINEL_API || "http://127.0.0.1:5001";
     setProposals(prev => prev.map(p => p.id === id ? { ...p, status: "running" } : p));
-    // Simulate execution lifecycle
-    setTimeout(() => setProposals(prev => prev.map(p => p.id === id ? { ...p, status: "verifying" } : p)), 900);
-    setTimeout(() => setProposals(prev => prev.map(p => p.id === id ? { ...p, status: "done" } : p)), 2200);
+    try {
+      const response = await fetch(`${apiBase}/v1/proposals/${id}/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approved: true, dry_run: true }) });
+      const result = await response.json();
+      setProposals(prev => prev.map(p => p.id === id ? { ...p, status: result.status } : p));
+    } catch (error) { console.warn("Proposal request failed", error); setProposals(prev => prev.map(p => p.id === id ? { ...p, status: "failed" } : p)); }
   };
 
   return (
