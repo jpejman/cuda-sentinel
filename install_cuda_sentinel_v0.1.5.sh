@@ -4,7 +4,7 @@
 # Fixes: proposal directory creation, full directory scaffolding, safer systemd generation,
 # improved logging, NVIDIA driver validation, smoke-test readiness.
 
-set -e
+set -Eeuo pipefail
 
 APP_DIR="/opt/cuda-sentinel"
 LOG_DIR="/var/log/cuda-sentinel"
@@ -13,18 +13,30 @@ SERVICE_FILE="$SYSTEMD_DIR/cuda-sentinel.service"
 PROPOSAL_DIR="$APP_DIR/proposals"
 UTILS_DIR="$APP_DIR/utils"
 FIXPROPOSAL_DIR="$APP_DIR/fix_proposals"
-BACKUP_DIR="/opt/cuda-sentinel-v0.1.5-backup"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+BACKUP_DIR="/opt/cuda-sentinel-v0.1.5-backup-${TIMESTAMP}"
 
 log() {
-    echo -e "[+] $1"
+    echo "[+] $1"
 }
 warn() {
-    echo -e "[!] $1"
+    echo "[!] $1" >&2
 }
 success() {
-    echo -e "[\033[0;32m\u2713\033[0m] $1"
+    echo "[+] $1"
 }
+
+if [[ "${EUID}" -ne 0 ]]; then
+    warn "Run this installer as root, for example: sudo bash $0"
+    exit 1
+fi
+
+for required_command in cp date mkdir nvidia-smi systemctl; do
+    if ! command -v "${required_command}" >/dev/null 2>&1; then
+        warn "Required command not found: ${required_command}"
+        exit 1
+    fi
+done
 
 echo
 log "CUDA Sentinel Installer - Version v0.1.5-patch1"
@@ -35,8 +47,7 @@ echo
 # ----------------------------------------------------
 if [ -d "$APP_DIR" ]; then
     warn "Previous installation detected. Creating backup at $BACKUP_DIR"
-    rm -rf "$BACKUP_DIR" 2>/dev/null || true
-    cp -r "$APP_DIR" "$BACKUP_DIR"
+    cp -a "$APP_DIR" "$BACKUP_DIR"
     success "Backup created: $BACKUP_DIR"
 fi
 
@@ -65,6 +76,12 @@ success "Log directory ready at: $LOG_DIR"
 warn "Skipping rsync (manual copy expected)."
 warn "Place all updated CUDA Sentinel app files into: $APP_DIR"
 echo
+
+if [[ ! -f "$APP_DIR/agent.py" ]]; then
+    warn "Runtime agent missing: $APP_DIR/agent.py"
+    warn "Copy the application payload into $APP_DIR and rerun the installer."
+    exit 1
+fi
 
 # ----------------------------------------------------
 # STEP 5 — BACKFILL FIX PROPOSAL IF MISSING
@@ -117,7 +134,7 @@ else
         success "NVIDIA driver detected and functional."
     else
         warn "nvidia-smi exists but GPU communication failed."
-        read -p "Run fix_nvidia_driver.sh now? (Y/n): " ans
+        read -r -p "Run fix_nvidia_driver.sh now? (Y/n): " ans
         if [[ "$ans" =~ ^[Yy]$ || -z "$ans" ]]; then
             bash "$PROPOSAL_DIR/fix_nvidia_driver.sh"
         else
@@ -158,7 +175,6 @@ fi
 # STEP 8 — RELOAD + ENABLE + START SERVICE
 # ----------------------------------------------------
 log "Reloading systemd and enabling service..."
-systemctl daemon-reexec
 systemctl daemon-reload
 systemctl enable cuda-sentinel
 

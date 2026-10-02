@@ -1,0 +1,26 @@
+version: 0.1
+snapshot:
+  max_file_size_mb: 10
+  excluded_dirs:
+    - .git
+    - logs
+    - node_modules
+    - venv
+    - .venv
+    - __pycache__
+    - dist
+    - build
+  excluded_patterns:
+    - .env*
+    - "*.pyc"
+    - "*.dmp"
+    - "*.zip"
+review:
+  include_source: true
+  combined_docs: true
+security:
+  secret_scan: true
+git:
+  recent_commits: 25
+  include_diff_stat: true
+  include_full_diff: false

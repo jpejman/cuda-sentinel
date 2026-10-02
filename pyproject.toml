@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cuda-sentinel"
+version = "0.2.0"
+requires-python = ">=3.10"
+dependencies = ["fastapi>=0.100", "uvicorn>=0.23", "pydantic>=2.0", "psutil>=5.9"]
+
+[tool.setuptools.packages.find]
+include = ["cuda_sentinel*"]
