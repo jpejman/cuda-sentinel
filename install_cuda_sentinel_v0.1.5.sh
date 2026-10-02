@@ -8,6 +8,7 @@ set -Eeuo pipefail
 
 APP_DIR="/opt/cuda-sentinel"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$APP_DIR/venv"
 LOG_DIR="/var/log/cuda-sentinel"
 SYSTEMD_DIR="/etc/systemd/system"
 SERVICE_FILE="$SYSTEMD_DIR/cuda-sentinel.service"
@@ -61,7 +62,8 @@ log "Ensuring required directory structure..."
 mkdir -p "$APP_DIR" \
          "$PROPOSAL_DIR" \
          "$UTILS_DIR" \
-         "$FIXPROPOSAL_DIR"
+         "$FIXPROPOSAL_DIR" \
+         "/var/lib/cuda-sentinel"
 
 success "Directory tree ensured: $APP_DIR"
 
@@ -85,6 +87,14 @@ if [[ ! -f "$APP_DIR/cuda_sentinel/agent_runner.py" ]]; then
     exit 1
 fi
 success "Runtime package installed."
+
+if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+    log "Creating isolated Python environment..."
+    python3 -m venv "$VENV_DIR"
+fi
+"$VENV_DIR/bin/pip" install --upgrade pip
+"$VENV_DIR/bin/pip" install -r "$SOURCE_DIR/requirements.txt"
+success "Python dependencies installed in $VENV_DIR."
 
 # ----------------------------------------------------
 # STEP 5 — BACKFILL FIX PROPOSAL IF MISSING
@@ -159,7 +169,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 -m cuda_sentinel.agent_runner
+ExecStart=$VENV_DIR/bin/python -m cuda_sentinel.agent_runner
 WorkingDirectory=$APP_DIR
 Environment=PYTHONPATH=$APP_DIR
 Environment=SENTINEL_EVENTS_URL=http://127.0.0.1:5001/v1/events
@@ -194,7 +204,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 -m uvicorn cuda_sentinel.api:app --host 127.0.0.1 --port 5001
+ExecStart=$VENV_DIR/bin/python -m uvicorn cuda_sentinel.api:app --host 127.0.0.1 --port 5001
 WorkingDirectory=$APP_DIR
 Environment=PYTHONPATH=$APP_DIR
 StandardOutput=append:$LOG_DIR/api.log

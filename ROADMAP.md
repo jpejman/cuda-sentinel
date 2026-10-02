@@ -14,6 +14,8 @@ source-backed GPU operations product. Priority is ordered by operational risk.
 - Four runtime unit tests and CI checks are now present.
 - Installer now packages the runtime, starts API and agent systemd units, and
   the dashboard fetches live API data when available.
+- Systemd deployment runbook added, including install, auth, verification, and
+  rollback procedures; installer now creates an isolated Python environment.
 
 ## P0: Complete The Runtime And Safety Boundary (Mostly Complete)
 
