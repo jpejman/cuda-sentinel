@@ -163,9 +163,16 @@ ExecStart=/usr/bin/python3 -m cuda_sentinel.agent_runner
 WorkingDirectory=$APP_DIR
 Environment=PYTHONPATH=$APP_DIR
 Environment=SENTINEL_EVENTS_URL=http://127.0.0.1:5001/v1/events
+Environment=SENTINEL_STATE_DIR=/var/lib/cuda-sentinel
+Environment=LOG_LEVEL=INFO
 StandardOutput=append:$LOG_DIR/agent.log
 StandardError=append:$LOG_DIR/agent.err
 Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=$APP_DIR $LOG_DIR /var/lib/cuda-sentinel
 
 [Install]
 WantedBy=multi-user.target
@@ -193,6 +200,11 @@ StandardOutput=append:$LOG_DIR/api.log
 StandardError=append:$LOG_DIR/api.err
 Restart=on-failure
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=$APP_DIR $LOG_DIR /var/lib/cuda-sentinel
 
 [Install]
 WantedBy=multi-user.target

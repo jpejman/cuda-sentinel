@@ -44,3 +44,11 @@ class RemediationResult(BaseModel):
     status: ProposalStatus
     dry_run: bool
     message: str
+
+class RemediationAudit(BaseModel):
+    proposal_id: str
+    requested_at: datetime = Field(default_factory=utc_now)
+    approved: bool
+    dry_run: bool
+    status: ProposalStatus
+    message: str
